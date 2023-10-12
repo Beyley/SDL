@@ -409,6 +409,13 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
                 "-DHAVE_LINUX_INPUT_H", //TODO: properly check for this like the CMake script does
             });
         },
+        .windows => {
+            // windows has no stack checking support
+            try c_flags.appendSlice(&.{ 
+                "-mno-stack-arg-probe", 
+                "-fno-stack-protector" 
+            });
+        },
         else => {},
     }
 
