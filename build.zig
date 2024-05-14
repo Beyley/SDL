@@ -32,11 +32,11 @@ pub const SdlOptions = struct {
     linux_sdk_path: ?[]const u8 = null,
 };
 
-///Gets the default reccomended options for a particular CrossTarget
-pub fn getDefaultOptionsForTarget(target: std.zig.CrossTarget) SdlOptions {
+///Gets the default recommended options for a particular Target
+pub fn getDefaultOptionsForTarget(target: std.Target) SdlOptions {
     var options = SdlOptions{};
 
-    if (target.getAbi() == .android) {
+    if (target.abi == .android) {
         options.video_implementations.android = true;
         options.haptic_implementation = SdlHapticImplementation.android;
         options.joystick_implementations.android = true;
@@ -69,7 +69,7 @@ pub fn getDefaultOptionsForTarget(target: std.zig.CrossTarget) SdlOptions {
         return options;
     }
 
-    if (target.isLinux() or target.isFreeBSD() or target.isOpenBSD() or target.isNetBSD() or target.isDragonFlyBSD()) {
+    if (target.os.tag == .linux or target.os.tag == .freebsd or target.os.tag == .openbsd or target.os.tag == .netbsd or target.os.tag == .dragonfly) {
         //Linux, UNIX and BSD-likes all will have X11 and pthreads
         options.video_implementations.x11 = true;
         options.thread_implementation = .pthread;
@@ -80,7 +80,7 @@ pub fn getDefaultOptionsForTarget(target: std.zig.CrossTarget) SdlOptions {
         options.render_implementations.opengl = true;
     }
 
-    if (target.isLinux()) {
+    if (target.os.tag == .linux) {
         options.joystick_implementations.linux = true;
         options.joystick_implementations.steam = true;
         options.haptic_implementation = .linux;
@@ -97,11 +97,11 @@ pub fn getDefaultOptionsForTarget(target: std.zig.CrossTarget) SdlOptions {
         // options.video_implementations.wayland = true;
     }
 
-    if (target.isNetBSD() or target.isFreeBSD() or target.isOpenBSD() or target.isDragonFlyBSD()) {
+    if (target.os.tag == .freebsd or target.os.tag == .openbsd or target.os.tag == .netbsd or target.os.tag == .dragonfly) {
         options.joystick_implementations.bsd = true;
     }
 
-    if (target.isWindows()) {
+    if (target.os.tag == .windows) {
         options.video_implementations.windows = true;
 
         //enable all 3 types of windows joystick input
@@ -386,7 +386,7 @@ pub fn lazyToUpper(allocator: std.mem.Allocator, str: []const u8) ![]const u8 {
     return upper;
 }
 
-pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.OptimizeMode, _sdl_options: SdlOptions) !*std.build.CompileStep {
+pub fn createSDL(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, _sdl_options: SdlOptions) !*std.Build.Step.Compile {
     var sdl_options = _sdl_options;
     const options = .{
         .name = "SDL2",
@@ -394,7 +394,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
         .optimize = optimize,
     };
 
-    const lib: *std.Build.CompileStep = if (sdl_options.shared) b.addSharedLibrary(options) else b.addStaticLibrary(options);
+    const lib: *std.Build.Step.Compile = if (sdl_options.shared) b.addSharedLibrary(options) else b.addStaticLibrary(options);
 
     var c_flags = std.ArrayList([]const u8).init(b.allocator);
 
@@ -403,7 +403,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
     //workaround some parsing issues in the macos system-sdk in use
     lib.defineCMacro("__kernel_ptr_semantics", "");
 
-    switch (target.getOsTag()) {
+    switch (target.result.os.tag) {
         .linux => {
             try c_flags.appendSlice(&.{
                 "-DSDL_INPUT_LINUXEV",
@@ -413,7 +413,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
         else => {},
     }
 
-    switch (target.getAbi()) {
+    switch (target.result.abi) {
         .android => {
             //Define android
             lib.defineCMacro("__ANDROID__", "1");
@@ -433,14 +433,14 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
 
         if (sdl_options.video_sub_implementations.opengl_es) {
             lib.defineCMacro("SDL_VIDEO_OPENGL_ES", "1");
-            if (target.getAbi() == .android) {
+            if (target.result.abi == .android) {
                 lib.linkSystemLibrary("GLESv1_CM");
             }
         }
 
         if (sdl_options.video_sub_implementations.opengl_es2) {
             lib.defineCMacro("SDL_VIDEO_OPENGL_ES2", "1");
-            if (target.getAbi() == .android) {
+            if (target.result.abi == .android) {
                 lib.linkSystemLibrary("GLESv2");
             }
         }
@@ -470,7 +470,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
         }
     } //SDL_VIDEO_X
 
-    lib.addIncludePath(.{ .path = root_path ++ "include" });
+    lib.addIncludePath(b.path("include"));
     lib.addCSourceFiles(.{ .files = &generic_src_files, .flags = c_flags.items });
     lib.defineCMacro("SDL_USE_BUILTIN_OPENGL_DEFINITIONS", "1");
 
@@ -479,7 +479,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
     //    lib.linkLibCpp();
 
     //assume libcpp on android for now
-    if (target.getAbi() == .android) {
+    if (target.result.abi == .android) {
         lib.linkLibCpp();
     }
 
@@ -631,7 +631,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
         lib.defineCMacro("SDL_RENDER_DISABLED", "1");
     }
 
-    switch (target.getOsTag()) {
+    switch (target.result.os.tag) {
         //TODO: figure out why when linking against our built SDL it causes a linker failure `__stack_chk_fail was replaced` on windows
         .windows => {
             lib.addCSourceFiles(.{ .files = &windows_src_files, .flags = c_flags.items });
@@ -651,7 +651,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
             lib.addCSourceFiles(.{ .files = &objective_c_src_files, .flags = obj_flags });
         },
         .linux => {
-            if (target.getAbi() == .android) {
+            if (target.result.abi == .android) {
                 lib.addCSourceFiles(.{ .files = &android_src_files, .flags = c_flags.items });
             } else {
                 lib.addCSourceFiles(.{ .files = &linux_src_files, .flags = c_flags.items });
@@ -674,23 +674,22 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
     switch (sdl_options.thread_implementation) {
         //stdcpp and ngage have cpp code, so lets add exceptions for those, since find_c_cpp_sources separates the found c/cpp files
         .stdcpp => lib.addCSourceFiles(.{
-            .files = (try findCSources(b.allocator, root_path ++ "src/thread/stdcpp/")).cpp,
+            .files = (try findCSources(b.allocator, b.path("src/thread/stdcpp/"))).cpp,
             .flags = c_flags.items,
         }),
         .ngage => lib.addCSourceFiles(.{
-            .files = (try findCSources(b.allocator, root_path ++ "src/thread/ngage/")).cpp,
+            .files = (try findCSources(b.allocator, b.path("src/thread/ngage/"))).cpp,
             .flags = c_flags.items,
         }),
         //Windows implementation of thread requires parts of the generic implementation,
         //not sure if this is fully correct (or if we need to define SDL_THREAD_GENERIC_COND_SUFFIX)
         //due to a linker error on Windows that happens earlier on, but it seems fine enough for now, and can be tested later
         .windows => {
-            lib.addCSourceFile(.{ .file = .{ .path = root_path ++ "src/thread/generic/SDL_syscond.c" }, .flags = c_flags.items });
-            lib.addCSourceFiles(.{ .files = (try findCSources(b.allocator, root_path ++ "src/thread/windows/")).c, .flags = c_flags.items });
+            lib.addCSourceFile(.{ .file = b.path("src/thread/generic/SDL_syscond.c"), .flags = c_flags.items });
+            lib.addCSourceFiles(.{ .files = (try findCSources(b.allocator, b.path("src/thread/windows/"))).c, .flags = c_flags.items });
         },
-        else => |value| {
-            const path = try std.mem.concat(b.allocator, u8, &.{ root_path, "src/thread/", @tagName(value), "/" });
-            lib.addCSourceFiles(.{ .files = (try findCSources(b.allocator, path)).c, .flags = c_flags.items });
+        inline else => |value| {
+            lib.addCSourceFiles(.{ .files = (try findCSources(b.allocator, b.path("src/thread/" ++ @tagName(value) ++ "/"))).c, .flags = c_flags.items });
         },
     }
 
@@ -741,7 +740,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
             lib.linkSystemLibrary("X11");
             lib.linkSystemLibrary("Xext");
 
-            const src_files = try findCSources(b.allocator, root_path ++ "src/video/x11/");
+            const src_files = try findCSources(b.allocator, b.path("src/video/x11/"));
 
             lib.addCSourceFiles(.{ .files = src_files.c, .flags = c_flags.items });
         }
@@ -756,18 +755,18 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
 
             lib.addIncludePath(.{ .path = root_path ++ "include/wayland-protocols" });
 
-            const src_files = try findCSources(b.allocator, root_path ++ "src/video/wayland/");
+            const src_files = try findCSources(b.allocator, b.path("src/video/wayland/"));
             lib.addCSourceFiles(.{ .files = src_files.c, .flags = c_flags.items });
         }
 
         if (sdl_options.video_implementations.windows) {
-            const src_files = try findCSources(b.allocator, root_path ++ "src/video/windows/");
+            const src_files = try findCSources(b.allocator, b.path("src/video/windows/"));
 
             lib.addCSourceFiles(.{ .files = src_files.c, .flags = c_flags.items });
         }
 
         if (sdl_options.video_implementations.android) {
-            const src_files = try findCSources(b.allocator, root_path ++ "src/video/android/");
+            const src_files = try findCSources(b.allocator, b.path("src/video/android/"));
 
             lib.addCSourceFiles(.{ .files = src_files.c, .flags = c_flags.items });
         }
@@ -1039,7 +1038,7 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
 
     { //render implementations
         if (sdl_options.render_implementations.software) {
-            const source = try findCSources(b.allocator, root_path ++ "src/render/software/");
+            const source = try findCSources(b.allocator, b.path("src/render/software/"));
 
             lib.addCSourceFiles(.{
                 .files = source.c,
@@ -1049,21 +1048,21 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
 
         if (sdl_options.render_implementations.direct3d) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/direct3d/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/direct3d/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.direct3d11) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/direct3d11/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/direct3d11/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.direct3d12) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/direct3d12/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/direct3d12/"))).c,
                 .flags = c_flags.items,
             });
         }
@@ -1080,57 +1079,57 @@ pub fn createSDL(b: *std.Build, target: std.zig.CrossTarget, optimize: std.built
 
         if (sdl_options.render_implementations.opengl) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/opengl/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/opengl/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.opengles) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/opengles/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/opengles/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.opengles2) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/opengles2/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/opengles2/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.ps2) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/ps2/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/ps2/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.psp) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/psp/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/psp/"))).c,
                 .flags = c_flags.items,
             });
         }
 
         if (sdl_options.render_implementations.vitagxm) {
             lib.addCSourceFiles(.{
-                .files = (try findCSources(b.allocator, root_path ++ "src/render/vitagxm/")).c,
+                .files = (try findCSources(b.allocator, b.path("src/render/vitagxm/"))).c,
                 .flags = c_flags.items,
             });
         }
     } //render implementations
 
-    lib.installHeadersDirectory(root_path ++ "include", "SDL2");
+    lib.installHeadersDirectory(b.path("include"), "SDL2", .{});
 
     return lib;
 }
 
-pub fn applyLinkerArgs(b: *std.Build, target: std.zig.CrossTarget, lib: *std.Build.CompileStep, sdl_options: SdlOptions) !void {
-    switch (target.getOsTag()) {
+pub fn applyLinkerArgs(b: *std.Build, target: std.Build.ResolvedTarget, lib: *std.Build.Step.Compile, sdl_options: SdlOptions) !void {
+    switch (target.result.os.tag) {
         .linux => {
             //Return early, android doesnt need anything from here
-            if (target.getAbi() == .android) {
+            if (target.result.abi == .android) {
                 return;
             }
 
@@ -1146,13 +1145,13 @@ pub fn applyLinkerArgs(b: *std.Build, target: std.zig.CrossTarget, lib: *std.Bui
                 }
 
                 lib.addIncludePath(.{ .path = b.fmt("{s}/include", .{linux_sdk_path}) });
-                lib.addLibraryPath(.{ .path = b.fmt("{s}/lib/{s}", .{ linux_sdk_path, try target.linuxTriple(b.allocator) }) });
-            } else if (!target.isNative()) {
+                lib.addLibraryPath(.{ .path = b.fmt("{s}/lib/{s}", .{ linux_sdk_path, try target.result.linuxTriple(b.allocator) }) });
+            } else if (!target.query.isNative()) {
                 @panic("Linux SDK path must be provided when cross compiling!");
             }
 
             if (sdl_options.audio_implementations.pipewire) {
-                if (target.isNative()) {
+                if (target.query.isNative()) {
                     lib.linkSystemLibrary("libpipewire-0.3");
                 } else {
                     lib.linkSystemLibrary("pipewire-0.3");
@@ -1183,11 +1182,11 @@ pub fn applyLinkerArgs(b: *std.Build, target: std.zig.CrossTarget, lib: *std.Bui
                 lib.addFrameworkPath(.{ .path = b.fmt("{s}/System/Library/Frameworks", .{osx_sdk_path}) });
                 lib.addSystemIncludePath(.{ .path = b.fmt("{s}/usr/include", .{osx_sdk_path}) });
                 lib.addLibraryPath(.{ .path = b.fmt("{s}/usr/lib", .{osx_sdk_path}) });
-            } else if (!target.isNative()) {
+            } else if (!target.query.isNative()) {
                 @panic("MacOS SDK path must be provided when cross compiling!");
             }
 
-            lib.linkSystemLibraryName("objc");
+            lib.linkSystemLibrary("objc");
 
             lib.linkFramework("AppKit");
             lib.linkFramework("OpenGL");
@@ -1212,7 +1211,7 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    var options = getDefaultOptionsForTarget(target);
+    var options = getDefaultOptionsForTarget(target.result);
 
     const disable_audio = b.option(bool, "disable_audio", "Disables the audio subsystems") orelse false;
     const disable_render = b.option(bool, "disable_render", "Disables the render subsystems") orelse false;
@@ -1241,6 +1240,7 @@ pub fn build(b: *std.Build) !void {
     var example = b.addExecutable(.{
         .name = "simple_example",
         .root_source_file = .{ .path = "examples/simple.zig" },
+        .target = target,
     });
     //Link against SDL
     example.linkLibrary(sdl);
@@ -1256,11 +1256,11 @@ pub fn build(b: *std.Build) !void {
 ///Finds all c/cpp sources in a folder recursively
 ///Each type of file is split into its own array so that caller can specify specific compilation flags for each filetype
 ///Caller owns returned memory (but that doesnt really matter in the build script, we just dont clear anything :^)
-fn findCSources(allocator: std.mem.Allocator, search_path: []const u8) !struct { c: []const []const u8, cpp: []const []const u8 } {
+fn findCSources(allocator: std.mem.Allocator, lazy_path: std.Build.LazyPath) !struct { c: []const []const u8, cpp: []const []const u8 } {
     var c_list = std.ArrayList([]const u8).init(allocator);
     var cpp_list = std.ArrayList([]const u8).init(allocator);
 
-    var dir = try std.fs.openDirAbsolute(search_path, .{
+    var dir = try std.fs.openDirAbsolute(lazy_path.getPath(lazy_path.src_path.owner), .{
         .iterate = true,
     });
     defer dir.close();
@@ -1268,32 +1268,33 @@ fn findCSources(allocator: std.mem.Allocator, search_path: []const u8) !struct {
     var walker: std.fs.Dir.Walker = try dir.walk(allocator);
     defer walker.deinit();
 
-    var itr_next: ?std.fs.Dir.Walker.WalkerEntry = try walker.next();
+    var itr_next: ?std.fs.Dir.Walker.Entry = try walker.next();
     while (itr_next != null) {
-        const next: std.fs.Dir.Walker.WalkerEntry = itr_next.?;
+        const next: std.fs.Dir.Walker.Entry = itr_next.?;
 
         //if the file is a c source file
         if (std.mem.endsWith(u8, next.path, ".c")) {
-            var item = try allocator.alloc(u8, next.path.len + search_path.len);
+            std.debug.print("next.basename {s} next.path {s}\n", .{ next.basename, next.path });
+            var item = try allocator.alloc(u8, next.path.len + lazy_path.src_path.sub_path.len);
 
             //copy the root first
-            @memcpy(item[0..search_path.len], search_path);
+            @memcpy(item[0..lazy_path.src_path.sub_path.len], lazy_path.src_path.sub_path);
 
             //copy the filepath next
-            @memcpy(item[search_path.len..], next.path);
+            @memcpy(item[lazy_path.src_path.sub_path.len..], next.path);
 
             try c_list.append(item);
         }
 
         //if the file is a cpp source file
         if (std.mem.endsWith(u8, next.path, ".cpp")) {
-            var item = try allocator.alloc(u8, next.path.len + search_path.len);
+            var item = try allocator.alloc(u8, next.path.len + lazy_path.src_path.sub_path.len);
 
             //copy the root first
-            @memcpy(item[0..search_path.len], search_path);
+            @memcpy(item[0..lazy_path.src_path.sub_path.len], lazy_path.src_path.sub_path);
 
             //copy the filepath next
-            @memcpy(item[search_path.len..], next.path);
+            @memcpy(item[lazy_path.src_path.sub_path.len..], next.path);
 
             try cpp_list.append(item);
         }
@@ -1311,490 +1312,490 @@ fn root() []const u8 {
 const root_path = root() ++ "/";
 
 const audio_src_files = [_][]const u8{
-    root_path ++ "src/audio/SDL_audio.c",
-    root_path ++ "src/audio/SDL_audiocvt.c",
-    root_path ++ "src/audio/SDL_audiodev.c",
-    root_path ++ "src/audio/SDL_audiotypecvt.c",
-    root_path ++ "src/audio/SDL_mixer.c",
-    root_path ++ "src/audio/SDL_wave.c",
+    "src/audio/SDL_audio.c",
+    "src/audio/SDL_audiocvt.c",
+    "src/audio/SDL_audiodev.c",
+    "src/audio/SDL_audiotypecvt.c",
+    "src/audio/SDL_mixer.c",
+    "src/audio/SDL_wave.c",
 };
 
 const render_src_files = [_][]const u8{
-    root_path ++ "src/render/SDL_d3dmath.c",
-    root_path ++ "src/render/SDL_render.c",
-    root_path ++ "src/render/SDL_yuv_sw.c",
+    "src/render/SDL_d3dmath.c",
+    "src/render/SDL_render.c",
+    "src/render/SDL_yuv_sw.c",
 };
 
 const video_src_files = [_][]const u8{
-    root_path ++ "src/video/SDL_RLEaccel.c",
-    root_path ++ "src/video/SDL_blit.c",
-    root_path ++ "src/video/SDL_blit_0.c",
-    root_path ++ "src/video/SDL_blit_1.c",
-    root_path ++ "src/video/SDL_blit_A.c",
-    root_path ++ "src/video/SDL_blit_N.c",
-    root_path ++ "src/video/SDL_blit_auto.c",
-    root_path ++ "src/video/SDL_blit_copy.c",
-    root_path ++ "src/video/SDL_blit_slow.c",
-    root_path ++ "src/video/SDL_bmp.c",
-    root_path ++ "src/video/SDL_clipboard.c",
-    root_path ++ "src/video/SDL_egl.c",
-    root_path ++ "src/video/SDL_fillrect.c",
-    root_path ++ "src/video/SDL_pixels.c",
-    root_path ++ "src/video/SDL_rect.c",
-    root_path ++ "src/video/SDL_shape.c",
-    root_path ++ "src/video/SDL_stretch.c",
-    root_path ++ "src/video/SDL_surface.c",
-    root_path ++ "src/video/SDL_video.c",
-    root_path ++ "src/video/SDL_vulkan_utils.c",
-    root_path ++ "src/video/SDL_yuv.c",
-    root_path ++ "src/video/yuv2rgb/yuv_rgb.c",
+    "src/video/SDL_RLEaccel.c",
+    "src/video/SDL_blit.c",
+    "src/video/SDL_blit_0.c",
+    "src/video/SDL_blit_1.c",
+    "src/video/SDL_blit_A.c",
+    "src/video/SDL_blit_N.c",
+    "src/video/SDL_blit_auto.c",
+    "src/video/SDL_blit_copy.c",
+    "src/video/SDL_blit_slow.c",
+    "src/video/SDL_bmp.c",
+    "src/video/SDL_clipboard.c",
+    "src/video/SDL_egl.c",
+    "src/video/SDL_fillrect.c",
+    "src/video/SDL_pixels.c",
+    "src/video/SDL_rect.c",
+    "src/video/SDL_shape.c",
+    "src/video/SDL_stretch.c",
+    "src/video/SDL_surface.c",
+    "src/video/SDL_video.c",
+    "src/video/SDL_vulkan_utils.c",
+    "src/video/SDL_yuv.c",
+    "src/video/yuv2rgb/yuv_rgb.c",
 
-    root_path ++ "src/video/dummy/SDL_nullevents.c",
-    root_path ++ "src/video/dummy/SDL_nullframebuffer.c",
-    root_path ++ "src/video/dummy/SDL_nullvideo.c",
+    "src/video/dummy/SDL_nullevents.c",
+    "src/video/dummy/SDL_nullframebuffer.c",
+    "src/video/dummy/SDL_nullvideo.c",
 };
 
 const generic_src_files = [_][]const u8{
-    root_path ++ "src/SDL.c",
-    root_path ++ "src/SDL_assert.c",
-    root_path ++ "src/SDL_dataqueue.c",
-    root_path ++ "src/SDL_error.c",
-    root_path ++ "src/SDL_guid.c",
-    root_path ++ "src/SDL_hints.c",
-    root_path ++ "src/SDL_list.c",
-    root_path ++ "src/SDL_log.c",
-    root_path ++ "src/SDL_utils.c",
-    root_path ++ "src/atomic/SDL_atomic.c",
-    root_path ++ "src/atomic/SDL_spinlock.c",
-    root_path ++ "src/cpuinfo/SDL_cpuinfo.c",
-    root_path ++ "src/dynapi/SDL_dynapi.c",
-    root_path ++ "src/events/SDL_clipboardevents.c",
-    root_path ++ "src/events/SDL_displayevents.c",
-    root_path ++ "src/events/SDL_dropevents.c",
-    root_path ++ "src/events/SDL_events.c",
-    root_path ++ "src/events/SDL_gesture.c",
-    root_path ++ "src/events/SDL_keyboard.c",
-    root_path ++ "src/events/SDL_keysym_to_scancode.c",
-    root_path ++ "src/events/SDL_mouse.c",
-    root_path ++ "src/events/SDL_quit.c",
-    root_path ++ "src/events/SDL_scancode_tables.c",
-    root_path ++ "src/events/SDL_touch.c",
-    root_path ++ "src/events/SDL_windowevents.c",
-    root_path ++ "src/events/imKStoUCS.c",
-    root_path ++ "src/file/SDL_rwops.c",
-    root_path ++ "src/haptic/SDL_haptic.c",
-    root_path ++ "src/hidapi/SDL_hidapi.c",
+    "src/SDL.c",
+    "src/SDL_assert.c",
+    "src/SDL_dataqueue.c",
+    "src/SDL_error.c",
+    "src/SDL_guid.c",
+    "src/SDL_hints.c",
+    "src/SDL_list.c",
+    "src/SDL_log.c",
+    "src/SDL_utils.c",
+    "src/atomic/SDL_atomic.c",
+    "src/atomic/SDL_spinlock.c",
+    "src/cpuinfo/SDL_cpuinfo.c",
+    "src/dynapi/SDL_dynapi.c",
+    "src/events/SDL_clipboardevents.c",
+    "src/events/SDL_displayevents.c",
+    "src/events/SDL_dropevents.c",
+    "src/events/SDL_events.c",
+    "src/events/SDL_gesture.c",
+    "src/events/SDL_keyboard.c",
+    "src/events/SDL_keysym_to_scancode.c",
+    "src/events/SDL_mouse.c",
+    "src/events/SDL_quit.c",
+    "src/events/SDL_scancode_tables.c",
+    "src/events/SDL_touch.c",
+    "src/events/SDL_windowevents.c",
+    "src/events/imKStoUCS.c",
+    "src/file/SDL_rwops.c",
+    "src/haptic/SDL_haptic.c",
+    "src/hidapi/SDL_hidapi.c",
 
-    root_path ++ "src/joystick/SDL_gamecontroller.c",
-    root_path ++ "src/joystick/SDL_joystick.c",
-    root_path ++ "src/joystick/controller_type.c",
-    // root_path ++ "src/joystick/virtual/SDL_virtualjoystick.c",
+    "src/joystick/SDL_gamecontroller.c",
+    "src/joystick/SDL_joystick.c",
+    "src/joystick/controller_type.c",
+    // "src/joystick/virtual/SDL_virtualjoystick.c",
 
-    root_path ++ "src/libm/e_atan2.c",
-    root_path ++ "src/libm/e_exp.c",
-    root_path ++ "src/libm/e_fmod.c",
-    root_path ++ "src/libm/e_log.c",
-    root_path ++ "src/libm/e_log10.c",
-    root_path ++ "src/libm/e_pow.c",
-    root_path ++ "src/libm/e_rem_pio2.c",
-    root_path ++ "src/libm/e_sqrt.c",
-    root_path ++ "src/libm/k_cos.c",
-    root_path ++ "src/libm/k_rem_pio2.c",
-    root_path ++ "src/libm/k_sin.c",
-    root_path ++ "src/libm/k_tan.c",
-    root_path ++ "src/libm/s_atan.c",
-    root_path ++ "src/libm/s_copysign.c",
-    root_path ++ "src/libm/s_cos.c",
-    root_path ++ "src/libm/s_fabs.c",
-    root_path ++ "src/libm/s_floor.c",
-    root_path ++ "src/libm/s_scalbn.c",
-    root_path ++ "src/libm/s_sin.c",
-    root_path ++ "src/libm/s_tan.c",
-    root_path ++ "src/locale/SDL_locale.c",
-    root_path ++ "src/misc/SDL_url.c",
-    root_path ++ "src/power/SDL_power.c",
-    root_path ++ "src/sensor/SDL_sensor.c",
-    root_path ++ "src/stdlib/SDL_crc16.c",
-    root_path ++ "src/stdlib/SDL_crc32.c",
-    root_path ++ "src/stdlib/SDL_getenv.c",
-    root_path ++ "src/stdlib/SDL_iconv.c",
-    root_path ++ "src/stdlib/SDL_malloc.c",
-    root_path ++ "src/stdlib/SDL_mslibc.c",
-    root_path ++ "src/stdlib/SDL_qsort.c",
-    root_path ++ "src/stdlib/SDL_stdlib.c",
-    root_path ++ "src/stdlib/SDL_string.c",
-    root_path ++ "src/stdlib/SDL_strtokr.c",
-    root_path ++ "src/thread/SDL_thread.c",
-    root_path ++ "src/timer/SDL_timer.c",
+    "src/libm/e_atan2.c",
+    "src/libm/e_exp.c",
+    "src/libm/e_fmod.c",
+    "src/libm/e_log.c",
+    "src/libm/e_log10.c",
+    "src/libm/e_pow.c",
+    "src/libm/e_rem_pio2.c",
+    "src/libm/e_sqrt.c",
+    "src/libm/k_cos.c",
+    "src/libm/k_rem_pio2.c",
+    "src/libm/k_sin.c",
+    "src/libm/k_tan.c",
+    "src/libm/s_atan.c",
+    "src/libm/s_copysign.c",
+    "src/libm/s_cos.c",
+    "src/libm/s_fabs.c",
+    "src/libm/s_floor.c",
+    "src/libm/s_scalbn.c",
+    "src/libm/s_sin.c",
+    "src/libm/s_tan.c",
+    "src/locale/SDL_locale.c",
+    "src/misc/SDL_url.c",
+    "src/power/SDL_power.c",
+    "src/sensor/SDL_sensor.c",
+    "src/stdlib/SDL_crc16.c",
+    "src/stdlib/SDL_crc32.c",
+    "src/stdlib/SDL_getenv.c",
+    "src/stdlib/SDL_iconv.c",
+    "src/stdlib/SDL_malloc.c",
+    "src/stdlib/SDL_mslibc.c",
+    "src/stdlib/SDL_qsort.c",
+    "src/stdlib/SDL_stdlib.c",
+    "src/stdlib/SDL_string.c",
+    "src/stdlib/SDL_strtokr.c",
+    "src/thread/SDL_thread.c",
+    "src/timer/SDL_timer.c",
 
-    // root_path ++ "src/render/software/SDL_blendfillrect.c",
-    // root_path ++ "src/render/software/SDL_blendline.c",
-    // root_path ++ "src/render/software/SDL_blendpoint.c",
-    // root_path ++ "src/render/software/SDL_drawline.c",
-    // root_path ++ "src/render/software/SDL_drawpoint.c",
-    // root_path ++ "src/render/software/SDL_render_sw.c",
-    // root_path ++ "src/render/software/SDL_rotate.c",
-    // root_path ++ "src/render/software/SDL_triangle.c",
+    // "src/render/software/SDL_blendfillrect.c",
+    // "src/render/software/SDL_blendline.c",
+    // "src/render/software/SDL_blendpoint.c",
+    // "src/render/software/SDL_drawline.c",
+    // "src/render/software/SDL_drawpoint.c",
+    // "src/render/software/SDL_render_sw.c",
+    // "src/render/software/SDL_rotate.c",
+    // "src/render/software/SDL_triangle.c",
 
-    // root_path ++ "src/audio/dummy/SDL_dummyaudio.c",
+    // "src/audio/dummy/SDL_dummyaudio.c",
 
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_combined.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_gamecube.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_luna.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_ps3.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_ps4.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_ps5.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_rumble.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_shield.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_stadia.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_steam.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_switch.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_wii.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_xbox360.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_xbox360w.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapi_xboxone.c",
-    root_path ++ "src/joystick/hidapi/SDL_hidapijoystick.c",
+    "src/joystick/hidapi/SDL_hidapi_combined.c",
+    "src/joystick/hidapi/SDL_hidapi_gamecube.c",
+    "src/joystick/hidapi/SDL_hidapi_luna.c",
+    "src/joystick/hidapi/SDL_hidapi_ps3.c",
+    "src/joystick/hidapi/SDL_hidapi_ps4.c",
+    "src/joystick/hidapi/SDL_hidapi_ps5.c",
+    "src/joystick/hidapi/SDL_hidapi_rumble.c",
+    "src/joystick/hidapi/SDL_hidapi_shield.c",
+    "src/joystick/hidapi/SDL_hidapi_stadia.c",
+    "src/joystick/hidapi/SDL_hidapi_steam.c",
+    "src/joystick/hidapi/SDL_hidapi_switch.c",
+    "src/joystick/hidapi/SDL_hidapi_wii.c",
+    "src/joystick/hidapi/SDL_hidapi_xbox360.c",
+    "src/joystick/hidapi/SDL_hidapi_xbox360w.c",
+    "src/joystick/hidapi/SDL_hidapi_xboxone.c",
+    "src/joystick/hidapi/SDL_hidapijoystick.c",
 };
 
 const windows_src_files = [_][]const u8{
-    root_path ++ "src/core/windows/SDL_hid.c",
-    root_path ++ "src/core/windows/SDL_immdevice.c",
-    root_path ++ "src/core/windows/SDL_windows.c",
-    root_path ++ "src/core/windows/SDL_xinput.c",
-    root_path ++ "src/filesystem/windows/SDL_sysfilesystem.c",
-    // root_path ++ "src/hidapi/windows/hid.c",
+    "src/core/windows/SDL_hid.c",
+    "src/core/windows/SDL_immdevice.c",
+    "src/core/windows/SDL_windows.c",
+    "src/core/windows/SDL_xinput.c",
+    "src/filesystem/windows/SDL_sysfilesystem.c",
+    // "src/hidapi/windows/hid.c",
     // This can be enabled when Zig updates to the next mingw-w64 release,
     // which will make the headers gain `windows.gaming.input.h`.
     // Also revert the patch 2c79fd8fd04f1e5045cbe5978943b0aea7593110.
     //"src/joystick/windows/SDL_windows_gaming_input.c",
 
-    root_path ++ "src/loadso/windows/SDL_sysloadso.c",
-    // root_path ++ "src/main/windows/SDL_windows_main.c",
-    root_path ++ "src/misc/windows/SDL_sysurl.c",
-    root_path ++ "src/sensor/windows/SDL_windowssensor.c",
+    "src/loadso/windows/SDL_sysloadso.c",
+    // "src/main/windows/SDL_windows_main.c",
+    "src/misc/windows/SDL_sysurl.c",
+    "src/sensor/windows/SDL_windowssensor.c",
 
-    // root_path ++ "src/render/direct3d/SDL_render_d3d.c",
-    // root_path ++ "src/render/direct3d/SDL_shaders_d3d.c",
-    // root_path ++ "src/render/direct3d11/SDL_render_d3d11.c",
-    // root_path ++ "src/render/direct3d11/SDL_shaders_d3d11.c",
-    // root_path ++ "src/render/direct3d12/SDL_render_d3d12.c",
-    // root_path ++ "src/render/direct3d12/SDL_shaders_d3d12.c",
+    // "src/render/direct3d/SDL_render_d3d.c",
+    // "src/render/direct3d/SDL_shaders_d3d.c",
+    // "src/render/direct3d11/SDL_render_d3d11.c",
+    // "src/render/direct3d11/SDL_shaders_d3d11.c",
+    // "src/render/direct3d12/SDL_render_d3d12.c",
+    // "src/render/direct3d12/SDL_shaders_d3d12.c",
 
-    // root_path ++ "src/audio/directsound/SDL_directsound.c",
-    // root_path ++ "src/audio/wasapi/SDL_wasapi.c",
-    // root_path ++ "src/audio/wasapi/SDL_wasapi_win32.c",
-    // root_path ++ "src/audio/winmm/SDL_winmm.c",
-    // root_path ++ "src/audio/disk/SDL_diskaudio.c",
+    // "src/audio/directsound/SDL_directsound.c",
+    // "src/audio/wasapi/SDL_wasapi.c",
+    // "src/audio/wasapi/SDL_wasapi_win32.c",
+    // "src/audio/winmm/SDL_winmm.c",
+    // "src/audio/disk/SDL_diskaudio.c",
 
-    // root_path ++ "src/render/opengl/SDL_render_gl.c",
-    // root_path ++ "src/render/opengl/SDL_shaders_gl.c",
-    // root_path ++ "src/render/opengles/SDL_render_gles.c",
-    // root_path ++ "src/render/opengles2/SDL_render_gles2.c",
-    // root_path ++ "src/render/opengles2/SDL_shaders_gles2.c",
+    // "src/render/opengl/SDL_render_gl.c",
+    // "src/render/opengl/SDL_shaders_gl.c",
+    // "src/render/opengles/SDL_render_gles.c",
+    // "src/render/opengles2/SDL_render_gles2.c",
+    // "src/render/opengles2/SDL_shaders_gles2.c",
 };
 
 const linux_src_files = [_][]const u8{
-    root_path ++ "src/core/linux/SDL_dbus.c",
-    root_path ++ "src/core/linux/SDL_evdev.c",
-    root_path ++ "src/core/linux/SDL_evdev_capabilities.c",
-    root_path ++ "src/core/linux/SDL_evdev_kbd.c",
-    root_path ++ "src/core/linux/SDL_ibus.c",
-    root_path ++ "src/core/linux/SDL_ime.c",
-    root_path ++ "src/core/linux/SDL_sandbox.c",
-    root_path ++ "src/core/linux/SDL_threadprio.c",
-    root_path ++ "src/core/linux/SDL_udev.c",
+    "src/core/linux/SDL_dbus.c",
+    "src/core/linux/SDL_evdev.c",
+    "src/core/linux/SDL_evdev_capabilities.c",
+    "src/core/linux/SDL_evdev_kbd.c",
+    "src/core/linux/SDL_ibus.c",
+    "src/core/linux/SDL_ime.c",
+    "src/core/linux/SDL_sandbox.c",
+    "src/core/linux/SDL_threadprio.c",
+    "src/core/linux/SDL_udev.c",
     // "src/core/linux/SDL_fcitx.c",
-    root_path ++ "src/core/unix/SDL_poll.c",
+    "src/core/unix/SDL_poll.c",
 
-    root_path ++ "src/hidapi/linux/hid.c",
+    "src/hidapi/linux/hid.c",
 
-    root_path ++ "src/sensor/dummy/SDL_dummysensor.c",
+    "src/sensor/dummy/SDL_dummysensor.c",
 
-    root_path ++ "src/misc/unix/SDL_sysurl.c",
+    "src/misc/unix/SDL_sysurl.c",
 
-    // root_path ++ "src/audio/alsa/SDL_alsa_audio.c",
-    // root_path ++ "src/audio/jack/SDL_jackaudio.c",
-    // root_path ++ "src/audio/pulseaudio/SDL_pulseaudio.c",
+    // "src/audio/alsa/SDL_alsa_audio.c",
+    // "src/audio/jack/SDL_jackaudio.c",
+    // "src/audio/pulseaudio/SDL_pulseaudio.c",
 };
 
 const android_src_files = [_][]const u8{
-    root_path ++ "src/core/android/SDL_android.c",
-    // root_path ++ "src/core/unix/SDL_poll.c",
+    "src/core/android/SDL_android.c",
+    // "src/core/unix/SDL_poll.c",
 
-    root_path ++ "src/hidapi/android/hid.cpp",
+    "src/hidapi/android/hid.cpp",
 
-    root_path ++ "src/sensor/dummy/SDL_dummysensor.c",
+    "src/sensor/dummy/SDL_dummysensor.c",
 
-    root_path ++ "src/misc/android/SDL_sysurl.c",
+    "src/misc/android/SDL_sysurl.c",
 
-    // root_path ++ "src/audio/alsa/SDL_alsa_audio.c",
-    // root_path ++ "src/audio/jack/SDL_jackaudio.c",
-    // root_path ++ "src/audio/pulseaudio/SDL_pulseaudio.c",
+    // "src/audio/alsa/SDL_alsa_audio.c",
+    // "src/audio/jack/SDL_jackaudio.c",
+    // "src/audio/pulseaudio/SDL_pulseaudio.c",
 };
 
 const darwin_src_files = [_][]const u8{
-    // root_path ++ "src/joystick/darwin/SDL_iokitjoystick.c",
-    // root_path ++ "src/power/macosx/SDL_syspower.c",
-    root_path ++ "src/loadso/dlopen/SDL_sysloadso.c",
-    // root_path ++ "src/audio/disk/SDL_diskaudio.c",
-    // root_path ++ "src/render/opengl/SDL_render_gl.c",
-    // root_path ++ "src/render/opengl/SDL_shaders_gl.c",
-    // root_path ++ "src/render/opengles/SDL_render_gles.c",
-    // root_path ++ "src/render/opengles2/SDL_render_gles2.c",
-    // root_path ++ "src/render/opengles2/SDL_shaders_gles2.c",
-    root_path ++ "src/sensor/dummy/SDL_dummysensor.c",
+    // "src/joystick/darwin/SDL_iokitjoystick.c",
+    // "src/power/macosx/SDL_syspower.c",
+    "src/loadso/dlopen/SDL_sysloadso.c",
+    // "src/audio/disk/SDL_diskaudio.c",
+    // "src/render/opengl/SDL_render_gl.c",
+    // "src/render/opengl/SDL_shaders_gl.c",
+    // "src/render/opengles/SDL_render_gles.c",
+    // "src/render/opengles2/SDL_render_gles2.c",
+    // "src/render/opengles2/SDL_shaders_gles2.c",
+    "src/sensor/dummy/SDL_dummysensor.c",
 };
 
 const objective_c_src_files = [_][]const u8{
-    // root_path ++ "src/audio/coreaudio/SDL_coreaudio.m",
-    root_path ++ "src/file/cocoa/SDL_rwopsbundlesupport.m",
-    root_path ++ "src/filesystem/cocoa/SDL_sysfilesystem.m",
+    // "src/audio/coreaudio/SDL_coreaudio.m",
+    "src/file/cocoa/SDL_rwopsbundlesupport.m",
+    "src/filesystem/cocoa/SDL_sysfilesystem.m",
     //"src/hidapi/testgui/mac_support_cocoa.m",
     // This appears to be for SDL3 only.
     //"src/joystick/apple/SDL_mfijoystick.m",
-    root_path ++ "src/misc/macosx/SDL_sysurl.m",
-    // root_path ++ "src/power/uikit/SDL_syspower.m",
-    // root_path ++ "src/render/metal/SDL_render_metal.m",
-    root_path ++ "src/sensor/coremotion/SDL_coremotionsensor.m",
-    root_path ++ "src/video/cocoa/SDL_cocoaclipboard.m",
-    root_path ++ "src/video/cocoa/SDL_cocoaevents.m",
-    root_path ++ "src/video/cocoa/SDL_cocoakeyboard.m",
-    root_path ++ "src/video/cocoa/SDL_cocoamessagebox.m",
-    root_path ++ "src/video/cocoa/SDL_cocoametalview.m",
-    root_path ++ "src/video/cocoa/SDL_cocoamodes.m",
-    root_path ++ "src/video/cocoa/SDL_cocoamouse.m",
-    root_path ++ "src/video/cocoa/SDL_cocoaopengl.m",
-    root_path ++ "src/video/cocoa/SDL_cocoaopengles.m",
-    root_path ++ "src/video/cocoa/SDL_cocoashape.m",
-    root_path ++ "src/video/cocoa/SDL_cocoavideo.m",
-    root_path ++ "src/video/cocoa/SDL_cocoavulkan.m",
-    root_path ++ "src/video/cocoa/SDL_cocoawindow.m",
-    root_path ++ "src/video/uikit/SDL_uikitappdelegate.m",
-    root_path ++ "src/video/uikit/SDL_uikitclipboard.m",
-    root_path ++ "src/video/uikit/SDL_uikitevents.m",
-    root_path ++ "src/video/uikit/SDL_uikitmessagebox.m",
-    root_path ++ "src/video/uikit/SDL_uikitmetalview.m",
-    root_path ++ "src/video/uikit/SDL_uikitmodes.m",
-    root_path ++ "src/video/uikit/SDL_uikitopengles.m",
-    root_path ++ "src/video/uikit/SDL_uikitopenglview.m",
-    root_path ++ "src/video/uikit/SDL_uikitvideo.m",
-    root_path ++ "src/video/uikit/SDL_uikitview.m",
-    root_path ++ "src/video/uikit/SDL_uikitviewcontroller.m",
-    root_path ++ "src/video/uikit/SDL_uikitvulkan.m",
-    root_path ++ "src/video/uikit/SDL_uikitwindow.m",
+    "src/misc/macosx/SDL_sysurl.m",
+    // "src/power/uikit/SDL_syspower.m",
+    // "src/render/metal/SDL_render_metal.m",
+    "src/sensor/coremotion/SDL_coremotionsensor.m",
+    "src/video/cocoa/SDL_cocoaclipboard.m",
+    "src/video/cocoa/SDL_cocoaevents.m",
+    "src/video/cocoa/SDL_cocoakeyboard.m",
+    "src/video/cocoa/SDL_cocoamessagebox.m",
+    "src/video/cocoa/SDL_cocoametalview.m",
+    "src/video/cocoa/SDL_cocoamodes.m",
+    "src/video/cocoa/SDL_cocoamouse.m",
+    "src/video/cocoa/SDL_cocoaopengl.m",
+    "src/video/cocoa/SDL_cocoaopengles.m",
+    "src/video/cocoa/SDL_cocoashape.m",
+    "src/video/cocoa/SDL_cocoavideo.m",
+    "src/video/cocoa/SDL_cocoavulkan.m",
+    "src/video/cocoa/SDL_cocoawindow.m",
+    "src/video/uikit/SDL_uikitappdelegate.m",
+    "src/video/uikit/SDL_uikitclipboard.m",
+    "src/video/uikit/SDL_uikitevents.m",
+    "src/video/uikit/SDL_uikitmessagebox.m",
+    "src/video/uikit/SDL_uikitmetalview.m",
+    "src/video/uikit/SDL_uikitmodes.m",
+    "src/video/uikit/SDL_uikitopengles.m",
+    "src/video/uikit/SDL_uikitopenglview.m",
+    "src/video/uikit/SDL_uikitvideo.m",
+    "src/video/uikit/SDL_uikitview.m",
+    "src/video/uikit/SDL_uikitviewcontroller.m",
+    "src/video/uikit/SDL_uikitvulkan.m",
+    "src/video/uikit/SDL_uikitwindow.m",
 };
 
 const ios_src_files = [_][]const u8{
-    root_path ++ "src/hidapi/ios/hid.m",
-    root_path ++ "src/misc/ios/SDL_sysurl.m",
-    root_path ++ "src/joystick/iphoneos/SDL_mfijoystick.m",
+    "src/hidapi/ios/hid.m",
+    "src/misc/ios/SDL_sysurl.m",
+    "src/joystick/iphoneos/SDL_mfijoystick.m",
 };
 
 const unknown_src_files = [_][]const u8{
-    root_path ++ "src/audio/aaudio/SDL_aaudio.c",
-    root_path ++ "src/audio/android/SDL_androidaudio.c",
-    root_path ++ "src/audio/arts/SDL_artsaudio.c",
-    root_path ++ "src/audio/dsp/SDL_dspaudio.c",
-    root_path ++ "src/audio/emscripten/SDL_emscriptenaudio.c",
-    root_path ++ "src/audio/esd/SDL_esdaudio.c",
-    root_path ++ "src/audio/fusionsound/SDL_fsaudio.c",
-    root_path ++ "src/audio/n3ds/SDL_n3dsaudio.c",
-    root_path ++ "src/audio/nacl/SDL_naclaudio.c",
-    root_path ++ "src/audio/nas/SDL_nasaudio.c",
-    root_path ++ "src/audio/netbsd/SDL_netbsdaudio.c",
-    root_path ++ "src/audio/openslES/SDL_openslES.c",
-    root_path ++ "src/audio/os2/SDL_os2audio.c",
-    root_path ++ "src/audio/paudio/SDL_paudio.c",
-    root_path ++ "src/audio/pipewire/SDL_pipewire.c",
-    root_path ++ "src/audio/ps2/SDL_ps2audio.c",
-    root_path ++ "src/audio/psp/SDL_pspaudio.c",
-    root_path ++ "src/audio/qsa/SDL_qsa_audio.c",
-    root_path ++ "src/audio/sndio/SDL_sndioaudio.c",
-    root_path ++ "src/audio/sun/SDL_sunaudio.c",
-    root_path ++ "src/audio/vita/SDL_vitaaudio.c",
+    "src/audio/aaudio/SDL_aaudio.c",
+    "src/audio/android/SDL_androidaudio.c",
+    "src/audio/arts/SDL_artsaudio.c",
+    "src/audio/dsp/SDL_dspaudio.c",
+    "src/audio/emscripten/SDL_emscriptenaudio.c",
+    "src/audio/esd/SDL_esdaudio.c",
+    "src/audio/fusionsound/SDL_fsaudio.c",
+    "src/audio/n3ds/SDL_n3dsaudio.c",
+    "src/audio/nacl/SDL_naclaudio.c",
+    "src/audio/nas/SDL_nasaudio.c",
+    "src/audio/netbsd/SDL_netbsdaudio.c",
+    "src/audio/openslES/SDL_openslES.c",
+    "src/audio/os2/SDL_os2audio.c",
+    "src/audio/paudio/SDL_paudio.c",
+    "src/audio/pipewire/SDL_pipewire.c",
+    "src/audio/ps2/SDL_ps2audio.c",
+    "src/audio/psp/SDL_pspaudio.c",
+    "src/audio/qsa/SDL_qsa_audio.c",
+    "src/audio/sndio/SDL_sndioaudio.c",
+    "src/audio/sun/SDL_sunaudio.c",
+    "src/audio/vita/SDL_vitaaudio.c",
 
-    root_path ++ "src/core/android/SDL_android.c",
-    root_path ++ "src/core/freebsd/SDL_evdev_kbd_freebsd.c",
-    root_path ++ "src/core/openbsd/SDL_wscons_kbd.c",
-    root_path ++ "src/core/openbsd/SDL_wscons_mouse.c",
-    root_path ++ "src/core/os2/SDL_os2.c",
-    root_path ++ "src/core/os2/geniconv/geniconv.c",
-    root_path ++ "src/core/os2/geniconv/os2cp.c",
-    root_path ++ "src/core/os2/geniconv/os2iconv.c",
-    root_path ++ "src/core/os2/geniconv/sys2utf8.c",
-    root_path ++ "src/core/os2/geniconv/test.c",
+    "src/core/android/SDL_android.c",
+    "src/core/freebsd/SDL_evdev_kbd_freebsd.c",
+    "src/core/openbsd/SDL_wscons_kbd.c",
+    "src/core/openbsd/SDL_wscons_mouse.c",
+    "src/core/os2/SDL_os2.c",
+    "src/core/os2/geniconv/geniconv.c",
+    "src/core/os2/geniconv/os2cp.c",
+    "src/core/os2/geniconv/os2iconv.c",
+    "src/core/os2/geniconv/sys2utf8.c",
+    "src/core/os2/geniconv/test.c",
 
-    root_path ++ "src/file/n3ds/SDL_rwopsromfs.c",
+    "src/file/n3ds/SDL_rwopsromfs.c",
 
-    root_path ++ "src/filesystem/android/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/dummy/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/emscripten/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/n3ds/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/nacl/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/os2/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/ps2/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/psp/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/riscos/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/unix/SDL_sysfilesystem.c",
-    root_path ++ "src/filesystem/vita/SDL_sysfilesystem.c",
+    "src/filesystem/android/SDL_sysfilesystem.c",
+    "src/filesystem/dummy/SDL_sysfilesystem.c",
+    "src/filesystem/emscripten/SDL_sysfilesystem.c",
+    "src/filesystem/n3ds/SDL_sysfilesystem.c",
+    "src/filesystem/nacl/SDL_sysfilesystem.c",
+    "src/filesystem/os2/SDL_sysfilesystem.c",
+    "src/filesystem/ps2/SDL_sysfilesystem.c",
+    "src/filesystem/psp/SDL_sysfilesystem.c",
+    "src/filesystem/riscos/SDL_sysfilesystem.c",
+    "src/filesystem/unix/SDL_sysfilesystem.c",
+    "src/filesystem/vita/SDL_sysfilesystem.c",
 
-    root_path ++ "src/hidapi/libusb/hid.c",
-    root_path ++ "src/hidapi/mac/hid.c",
+    "src/hidapi/libusb/hid.c",
+    "src/hidapi/mac/hid.c",
 
-    root_path ++ "src/joystick/android/SDL_sysjoystick.c",
-    root_path ++ "src/joystick/bsd/SDL_bsdjoystick.c",
-    root_path ++ "src/joystick/dummy/SDL_sysjoystick.c",
-    root_path ++ "src/joystick/emscripten/SDL_sysjoystick.c",
-    root_path ++ "src/joystick/n3ds/SDL_sysjoystick.c",
-    root_path ++ "src/joystick/os2/SDL_os2joystick.c",
-    root_path ++ "src/joystick/ps2/SDL_sysjoystick.c",
-    root_path ++ "src/joystick/psp/SDL_sysjoystick.c",
-    root_path ++ "src/joystick/steam/SDL_steamcontroller.c",
-    root_path ++ "src/joystick/vita/SDL_sysjoystick.c",
+    "src/joystick/android/SDL_sysjoystick.c",
+    "src/joystick/bsd/SDL_bsdjoystick.c",
+    "src/joystick/dummy/SDL_sysjoystick.c",
+    "src/joystick/emscripten/SDL_sysjoystick.c",
+    "src/joystick/n3ds/SDL_sysjoystick.c",
+    "src/joystick/os2/SDL_os2joystick.c",
+    "src/joystick/ps2/SDL_sysjoystick.c",
+    "src/joystick/psp/SDL_sysjoystick.c",
+    "src/joystick/steam/SDL_steamcontroller.c",
+    "src/joystick/vita/SDL_sysjoystick.c",
 
-    root_path ++ "src/loadso/dummy/SDL_sysloadso.c",
-    root_path ++ "src/loadso/os2/SDL_sysloadso.c",
+    "src/loadso/dummy/SDL_sysloadso.c",
+    "src/loadso/os2/SDL_sysloadso.c",
 
-    root_path ++ "src/main/android/SDL_android_main.c",
-    root_path ++ "src/main/dummy/SDL_dummy_main.c",
-    root_path ++ "src/main/gdk/SDL_gdk_main.c",
-    root_path ++ "src/main/n3ds/SDL_n3ds_main.c",
-    root_path ++ "src/main/nacl/SDL_nacl_main.c",
-    root_path ++ "src/main/ps2/SDL_ps2_main.c",
-    root_path ++ "src/main/psp/SDL_psp_main.c",
-    root_path ++ "src/main/uikit/SDL_uikit_main.c",
+    "src/main/android/SDL_android_main.c",
+    "src/main/dummy/SDL_dummy_main.c",
+    "src/main/gdk/SDL_gdk_main.c",
+    "src/main/n3ds/SDL_n3ds_main.c",
+    "src/main/nacl/SDL_nacl_main.c",
+    "src/main/ps2/SDL_ps2_main.c",
+    "src/main/psp/SDL_psp_main.c",
+    "src/main/uikit/SDL_uikit_main.c",
 
-    root_path ++ "src/misc/android/SDL_sysurl.c",
-    root_path ++ "src/misc/dummy/SDL_sysurl.c",
-    root_path ++ "src/misc/emscripten/SDL_sysurl.c",
-    root_path ++ "src/misc/riscos/SDL_sysurl.c",
-    root_path ++ "src/misc/unix/SDL_sysurl.c",
-    root_path ++ "src/misc/vita/SDL_sysurl.c",
+    "src/misc/android/SDL_sysurl.c",
+    "src/misc/dummy/SDL_sysurl.c",
+    "src/misc/emscripten/SDL_sysurl.c",
+    "src/misc/riscos/SDL_sysurl.c",
+    "src/misc/unix/SDL_sysurl.c",
+    "src/misc/vita/SDL_sysurl.c",
 
-    // root_path ++ "src/power/android/SDL_syspower.c",
-    // root_path ++ "src/power/emscripten/SDL_syspower.c",
-    // root_path ++ "src/power/haiku/SDL_syspower.c",
-    // root_path ++ "src/power/n3ds/SDL_syspower.c",
-    // root_path ++ "src/power/psp/SDL_syspower.c",
-    // root_path ++ "src/power/vita/SDL_syspower.c",
+    // "src/power/android/SDL_syspower.c",
+    // "src/power/emscripten/SDL_syspower.c",
+    // "src/power/haiku/SDL_syspower.c",
+    // "src/power/n3ds/SDL_syspower.c",
+    // "src/power/psp/SDL_syspower.c",
+    // "src/power/vita/SDL_syspower.c",
 
-    root_path ++ "src/sensor/android/SDL_androidsensor.c",
-    root_path ++ "src/sensor/n3ds/SDL_n3dssensor.c",
-    root_path ++ "src/sensor/vita/SDL_vitasensor.c",
+    "src/sensor/android/SDL_androidsensor.c",
+    "src/sensor/n3ds/SDL_n3dssensor.c",
+    "src/sensor/vita/SDL_vitasensor.c",
 
-    root_path ++ "src/test/SDL_test_assert.c",
-    root_path ++ "src/test/SDL_test_common.c",
-    root_path ++ "src/test/SDL_test_compare.c",
-    root_path ++ "src/test/SDL_test_crc32.c",
-    root_path ++ "src/test/SDL_test_font.c",
-    root_path ++ "src/test/SDL_test_fuzzer.c",
-    root_path ++ "src/test/SDL_test_harness.c",
-    root_path ++ "src/test/SDL_test_imageBlit.c",
-    root_path ++ "src/test/SDL_test_imageBlitBlend.c",
-    root_path ++ "src/test/SDL_test_imageFace.c",
-    root_path ++ "src/test/SDL_test_imagePrimitives.c",
-    root_path ++ "src/test/SDL_test_imagePrimitivesBlend.c",
-    root_path ++ "src/test/SDL_test_log.c",
-    root_path ++ "src/test/SDL_test_md5.c",
-    root_path ++ "src/test/SDL_test_memory.c",
-    root_path ++ "src/test/SDL_test_random.c",
+    "src/test/SDL_test_assert.c",
+    "src/test/SDL_test_common.c",
+    "src/test/SDL_test_compare.c",
+    "src/test/SDL_test_crc32.c",
+    "src/test/SDL_test_font.c",
+    "src/test/SDL_test_fuzzer.c",
+    "src/test/SDL_test_harness.c",
+    "src/test/SDL_test_imageBlit.c",
+    "src/test/SDL_test_imageBlitBlend.c",
+    "src/test/SDL_test_imageFace.c",
+    "src/test/SDL_test_imagePrimitives.c",
+    "src/test/SDL_test_imagePrimitivesBlend.c",
+    "src/test/SDL_test_log.c",
+    "src/test/SDL_test_md5.c",
+    "src/test/SDL_test_memory.c",
+    "src/test/SDL_test_random.c",
 
-    root_path ++ "src/video/android/SDL_androidclipboard.c",
-    root_path ++ "src/video/android/SDL_androidevents.c",
-    root_path ++ "src/video/android/SDL_androidgl.c",
-    root_path ++ "src/video/android/SDL_androidkeyboard.c",
-    root_path ++ "src/video/android/SDL_androidmessagebox.c",
-    root_path ++ "src/video/android/SDL_androidmouse.c",
-    root_path ++ "src/video/android/SDL_androidtouch.c",
-    root_path ++ "src/video/android/SDL_androidvideo.c",
-    root_path ++ "src/video/android/SDL_androidvulkan.c",
-    root_path ++ "src/video/android/SDL_androidwindow.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_WM.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_dyn.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_events.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_modes.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_mouse.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_opengl.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_render.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_shape.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_video.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_vulkan.c",
-    root_path ++ "src/video/directfb/SDL_DirectFB_window.c",
-    root_path ++ "src/video/emscripten/SDL_emscriptenevents.c",
-    root_path ++ "src/video/emscripten/SDL_emscriptenframebuffer.c",
-    root_path ++ "src/video/emscripten/SDL_emscriptenmouse.c",
-    root_path ++ "src/video/emscripten/SDL_emscriptenopengles.c",
-    root_path ++ "src/video/emscripten/SDL_emscriptenvideo.c",
-    root_path ++ "src/video/kmsdrm/SDL_kmsdrmdyn.c",
-    root_path ++ "src/video/kmsdrm/SDL_kmsdrmevents.c",
-    root_path ++ "src/video/kmsdrm/SDL_kmsdrmmouse.c",
-    root_path ++ "src/video/kmsdrm/SDL_kmsdrmopengles.c",
-    root_path ++ "src/video/kmsdrm/SDL_kmsdrmvideo.c",
-    root_path ++ "src/video/kmsdrm/SDL_kmsdrmvulkan.c",
-    root_path ++ "src/video/n3ds/SDL_n3dsevents.c",
-    root_path ++ "src/video/n3ds/SDL_n3dsframebuffer.c",
-    root_path ++ "src/video/n3ds/SDL_n3dsswkb.c",
-    root_path ++ "src/video/n3ds/SDL_n3dstouch.c",
-    root_path ++ "src/video/n3ds/SDL_n3dsvideo.c",
-    root_path ++ "src/video/nacl/SDL_naclevents.c",
-    root_path ++ "src/video/nacl/SDL_naclglue.c",
-    root_path ++ "src/video/nacl/SDL_naclopengles.c",
-    root_path ++ "src/video/nacl/SDL_naclvideo.c",
-    root_path ++ "src/video/nacl/SDL_naclwindow.c",
-    root_path ++ "src/video/offscreen/SDL_offscreenevents.c",
-    root_path ++ "src/video/offscreen/SDL_offscreenframebuffer.c",
-    root_path ++ "src/video/offscreen/SDL_offscreenopengles.c",
-    root_path ++ "src/video/offscreen/SDL_offscreenvideo.c",
-    root_path ++ "src/video/offscreen/SDL_offscreenwindow.c",
-    root_path ++ "src/video/os2/SDL_os2dive.c",
-    root_path ++ "src/video/os2/SDL_os2messagebox.c",
-    root_path ++ "src/video/os2/SDL_os2mouse.c",
-    root_path ++ "src/video/os2/SDL_os2util.c",
-    root_path ++ "src/video/os2/SDL_os2video.c",
-    root_path ++ "src/video/os2/SDL_os2vman.c",
-    root_path ++ "src/video/pandora/SDL_pandora.c",
-    root_path ++ "src/video/pandora/SDL_pandora_events.c",
-    root_path ++ "src/video/ps2/SDL_ps2video.c",
-    root_path ++ "src/video/psp/SDL_pspevents.c",
-    root_path ++ "src/video/psp/SDL_pspgl.c",
-    root_path ++ "src/video/psp/SDL_pspmouse.c",
-    root_path ++ "src/video/psp/SDL_pspvideo.c",
-    root_path ++ "src/video/qnx/gl.c",
-    root_path ++ "src/video/qnx/keyboard.c",
-    root_path ++ "src/video/qnx/video.c",
-    root_path ++ "src/video/raspberry/SDL_rpievents.c",
-    root_path ++ "src/video/raspberry/SDL_rpimouse.c",
-    root_path ++ "src/video/raspberry/SDL_rpiopengles.c",
-    root_path ++ "src/video/raspberry/SDL_rpivideo.c",
-    root_path ++ "src/video/riscos/SDL_riscosevents.c",
-    root_path ++ "src/video/riscos/SDL_riscosframebuffer.c",
-    root_path ++ "src/video/riscos/SDL_riscosmessagebox.c",
-    root_path ++ "src/video/riscos/SDL_riscosmodes.c",
-    root_path ++ "src/video/riscos/SDL_riscosmouse.c",
-    root_path ++ "src/video/riscos/SDL_riscosvideo.c",
-    root_path ++ "src/video/riscos/SDL_riscoswindow.c",
-    root_path ++ "src/video/vita/SDL_vitaframebuffer.c",
-    root_path ++ "src/video/vita/SDL_vitagl_pvr.c",
-    root_path ++ "src/video/vita/SDL_vitagles.c",
-    root_path ++ "src/video/vita/SDL_vitagles_pvr.c",
-    root_path ++ "src/video/vita/SDL_vitakeyboard.c",
-    root_path ++ "src/video/vita/SDL_vitamessagebox.c",
-    root_path ++ "src/video/vita/SDL_vitamouse.c",
-    root_path ++ "src/video/vita/SDL_vitatouch.c",
-    root_path ++ "src/video/vita/SDL_vitavideo.c",
-    root_path ++ "src/video/vivante/SDL_vivanteopengles.c",
-    root_path ++ "src/video/vivante/SDL_vivanteplatform.c",
-    root_path ++ "src/video/vivante/SDL_vivantevideo.c",
-    root_path ++ "src/video/vivante/SDL_vivantevulkan.c",
+    "src/video/android/SDL_androidclipboard.c",
+    "src/video/android/SDL_androidevents.c",
+    "src/video/android/SDL_androidgl.c",
+    "src/video/android/SDL_androidkeyboard.c",
+    "src/video/android/SDL_androidmessagebox.c",
+    "src/video/android/SDL_androidmouse.c",
+    "src/video/android/SDL_androidtouch.c",
+    "src/video/android/SDL_androidvideo.c",
+    "src/video/android/SDL_androidvulkan.c",
+    "src/video/android/SDL_androidwindow.c",
+    "src/video/directfb/SDL_DirectFB_WM.c",
+    "src/video/directfb/SDL_DirectFB_dyn.c",
+    "src/video/directfb/SDL_DirectFB_events.c",
+    "src/video/directfb/SDL_DirectFB_modes.c",
+    "src/video/directfb/SDL_DirectFB_mouse.c",
+    "src/video/directfb/SDL_DirectFB_opengl.c",
+    "src/video/directfb/SDL_DirectFB_render.c",
+    "src/video/directfb/SDL_DirectFB_shape.c",
+    "src/video/directfb/SDL_DirectFB_video.c",
+    "src/video/directfb/SDL_DirectFB_vulkan.c",
+    "src/video/directfb/SDL_DirectFB_window.c",
+    "src/video/emscripten/SDL_emscriptenevents.c",
+    "src/video/emscripten/SDL_emscriptenframebuffer.c",
+    "src/video/emscripten/SDL_emscriptenmouse.c",
+    "src/video/emscripten/SDL_emscriptenopengles.c",
+    "src/video/emscripten/SDL_emscriptenvideo.c",
+    "src/video/kmsdrm/SDL_kmsdrmdyn.c",
+    "src/video/kmsdrm/SDL_kmsdrmevents.c",
+    "src/video/kmsdrm/SDL_kmsdrmmouse.c",
+    "src/video/kmsdrm/SDL_kmsdrmopengles.c",
+    "src/video/kmsdrm/SDL_kmsdrmvideo.c",
+    "src/video/kmsdrm/SDL_kmsdrmvulkan.c",
+    "src/video/n3ds/SDL_n3dsevents.c",
+    "src/video/n3ds/SDL_n3dsframebuffer.c",
+    "src/video/n3ds/SDL_n3dsswkb.c",
+    "src/video/n3ds/SDL_n3dstouch.c",
+    "src/video/n3ds/SDL_n3dsvideo.c",
+    "src/video/nacl/SDL_naclevents.c",
+    "src/video/nacl/SDL_naclglue.c",
+    "src/video/nacl/SDL_naclopengles.c",
+    "src/video/nacl/SDL_naclvideo.c",
+    "src/video/nacl/SDL_naclwindow.c",
+    "src/video/offscreen/SDL_offscreenevents.c",
+    "src/video/offscreen/SDL_offscreenframebuffer.c",
+    "src/video/offscreen/SDL_offscreenopengles.c",
+    "src/video/offscreen/SDL_offscreenvideo.c",
+    "src/video/offscreen/SDL_offscreenwindow.c",
+    "src/video/os2/SDL_os2dive.c",
+    "src/video/os2/SDL_os2messagebox.c",
+    "src/video/os2/SDL_os2mouse.c",
+    "src/video/os2/SDL_os2util.c",
+    "src/video/os2/SDL_os2video.c",
+    "src/video/os2/SDL_os2vman.c",
+    "src/video/pandora/SDL_pandora.c",
+    "src/video/pandora/SDL_pandora_events.c",
+    "src/video/ps2/SDL_ps2video.c",
+    "src/video/psp/SDL_pspevents.c",
+    "src/video/psp/SDL_pspgl.c",
+    "src/video/psp/SDL_pspmouse.c",
+    "src/video/psp/SDL_pspvideo.c",
+    "src/video/qnx/gl.c",
+    "src/video/qnx/keyboard.c",
+    "src/video/qnx/video.c",
+    "src/video/raspberry/SDL_rpievents.c",
+    "src/video/raspberry/SDL_rpimouse.c",
+    "src/video/raspberry/SDL_rpiopengles.c",
+    "src/video/raspberry/SDL_rpivideo.c",
+    "src/video/riscos/SDL_riscosevents.c",
+    "src/video/riscos/SDL_riscosframebuffer.c",
+    "src/video/riscos/SDL_riscosmessagebox.c",
+    "src/video/riscos/SDL_riscosmodes.c",
+    "src/video/riscos/SDL_riscosmouse.c",
+    "src/video/riscos/SDL_riscosvideo.c",
+    "src/video/riscos/SDL_riscoswindow.c",
+    "src/video/vita/SDL_vitaframebuffer.c",
+    "src/video/vita/SDL_vitagl_pvr.c",
+    "src/video/vita/SDL_vitagles.c",
+    "src/video/vita/SDL_vitagles_pvr.c",
+    "src/video/vita/SDL_vitakeyboard.c",
+    "src/video/vita/SDL_vitamessagebox.c",
+    "src/video/vita/SDL_vitamouse.c",
+    "src/video/vita/SDL_vitatouch.c",
+    "src/video/vita/SDL_vitavideo.c",
+    "src/video/vivante/SDL_vivanteopengles.c",
+    "src/video/vivante/SDL_vivanteplatform.c",
+    "src/video/vivante/SDL_vivantevideo.c",
+    "src/video/vivante/SDL_vivantevulkan.c",
 
-    root_path ++ "src/render/opengl/SDL_render_gl.c",
-    root_path ++ "src/render/opengl/SDL_shaders_gl.c",
-    root_path ++ "src/render/opengles/SDL_render_gles.c",
-    root_path ++ "src/render/opengles2/SDL_render_gles2.c",
-    root_path ++ "src/render/opengles2/SDL_shaders_gles2.c",
-    root_path ++ "src/render/ps2/SDL_render_ps2.c",
-    root_path ++ "src/render/psp/SDL_render_psp.c",
-    root_path ++ "src/render/vitagxm/SDL_render_vita_gxm.c",
-    root_path ++ "src/render/vitagxm/SDL_render_vita_gxm_memory.c",
-    root_path ++ "src/render/vitagxm/SDL_render_vita_gxm_tools.c",
+    "src/render/opengl/SDL_render_gl.c",
+    "src/render/opengl/SDL_shaders_gl.c",
+    "src/render/opengles/SDL_render_gles.c",
+    "src/render/opengles2/SDL_render_gles2.c",
+    "src/render/opengles2/SDL_shaders_gles2.c",
+    "src/render/ps2/SDL_render_ps2.c",
+    "src/render/psp/SDL_render_psp.c",
+    "src/render/vitagxm/SDL_render_vita_gxm.c",
+    "src/render/vitagxm/SDL_render_vita_gxm_memory.c",
+    "src/render/vitagxm/SDL_render_vita_gxm_tools.c",
 };
