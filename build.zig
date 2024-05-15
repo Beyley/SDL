@@ -590,13 +590,14 @@ pub fn createSDL(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.
         lib.defineCMacro("SDL_AUDIO_DISABLED", "1");
     }
 
-    const any_render_enabled = false;
+    var any_render_enabled = false;
     const riStructInfo: std.builtin.Type.Struct = @typeInfo(EnabledSdlRenderImplementations).Struct;
     //Iterate over all fields on the video implementations struct
     inline for (riStructInfo.fields) |field| {
         const enabled: bool = @field(sdl_options.render_implementations, field.name);
         //If its enabled in the options
         if (enabled) {
+            any_render_enabled = true;
             //they arent consistent with their naming always :/
             if (std.mem.eql(u8, field.name, "software")) { //ok
                 lib.defineCMacro("SDL_VIDEO_RENDER_SW", "1");
