@@ -1274,7 +1274,6 @@ fn findCSources(allocator: std.mem.Allocator, lazy_path: std.Build.LazyPath) !st
 
         //if the file is a c source file
         if (std.mem.endsWith(u8, next.path, ".c")) {
-            std.debug.print("next.basename {s} next.path {s}\n", .{ next.basename, next.path });
             var item = try allocator.alloc(u8, next.path.len + lazy_path.src_path.sub_path.len);
 
             //copy the root first
