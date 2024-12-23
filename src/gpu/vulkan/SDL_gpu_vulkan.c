@@ -12247,6 +12247,7 @@ static XrResult VULKAN_INTERNAL_GetXrMinimumVulkanApiVersion(XrVersion *minimumV
 
 static bool VULKAN_PrepareXRDriver(SDL_VideoDevice *_this)
 {
+#ifdef HAVE_GPU_OPENXR
     // Set up dummy VulkanRenderer
     VulkanRenderer *renderer;
     Uint8 result;
@@ -12341,6 +12342,10 @@ static bool VULKAN_PrepareXRDriver(SDL_VideoDevice *_this)
     SDL_Vulkan_UnloadLibrary();
     SDL_OPENXR_UnloadLoaderSymbols();
     return result;
+#else
+    SDL_SetError("SDL not built with OpenXR support");
+    return false;
+#endif
 }
 
 static bool VULKAN_CreateXRDevice(SDL_GPUDevice **gpu_device, XrInstance *xrInstance, XrSystemId *xrSystem, bool debugMode, bool preferLowPower, SDL_PropertiesID props)
