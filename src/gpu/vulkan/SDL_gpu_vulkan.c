@@ -11787,6 +11787,9 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer)
             SDL_stack_free(physicalDeviceExtensions);
             return 0;
         }
+
+        SDL_stack_free(physicalDevices);
+        SDL_stack_free(physicalDeviceExtensions);
     }
 
     renderer->physicalDeviceProperties.sType =
@@ -11814,8 +11817,6 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer)
         renderer->physicalDevice,
         &renderer->memoryProperties);
 
-    SDL_stack_free(physicalDevices);
-    SDL_stack_free(physicalDeviceExtensions);
     return 1;
 }
 
