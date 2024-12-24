@@ -4292,12 +4292,6 @@ static bool METAL_SupportsTextureFormat(
 
 // Device Creation
 
-static bool METAL_PrepareXRDriver(SDL_VideoDevice *this)
-{
-    SDL_SetError("The metal backend does not currently support OpenXR");
-    return false;
-}
-
 static bool METAL_PrepareDriver(SDL_VideoDevice *this)
 {
     if (@available(macOS 10.14, iOS 13.0, tvOS 13.0, *)) {
@@ -4487,12 +4481,6 @@ static XrResult METAL_CreateXRSession(
     return XR_ERROR_FUNCTION_UNSUPPORTED;
 }
 
-static bool METAL_CreateXRDevice(SDL_GPUDevice **gpu_device, XrInstance *xrInstance, XrSystemId *xrSystem, bool debugMode, bool preferLowPower, SDL_PropertiesID props)
-{
-    SDL_SetError("The metal backend does not currently support OpenXR");
-    return false;
-}
-
 static SDL_GPUDevice *METAL_CreateDevice(bool debugMode, bool preferLowPower, SDL_PropertiesID props)
 {
     @autoreleasepool {
@@ -4634,9 +4622,7 @@ SDL_GPUBootstrap MetalDriver = {
     "metal",
     SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_METALLIB,
     METAL_PrepareDriver,
-    METAL_PrepareXRDriver,
     METAL_CreateDevice,
-    METAL_CreateXRDevice,
 };
 
 #endif // SDL_GPU_METAL
